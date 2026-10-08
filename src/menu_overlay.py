@@ -1,5 +1,5 @@
 """
-Pure-Logo Floating Action Dock (Displays ONLY circular option logos when clicked).
+Compact Pure-Logo Floating Action Dock (Full 5 Option Logos).
 """
 
 import customtkinter as ctk
@@ -19,12 +19,12 @@ TRANSPARENT_BG = "#010101"
 
 class BookMenuOverlay(ctk.CTkToplevel):
     """
-    Transparent Floating Dock that displays ONLY interactive circular LOGOS when clicked:
-    - 📝 Take Note Logo
-    - ⏰ Set Reminder Logo
-    - 📚 Library Dashboard Logo
-    - ⚙️ Settings Logo
-    - 📌 Minimize to Tray Logo
+    Compact floating dock displaying all 5 interactive circular option logos:
+    - 📝 Take Note
+    - ⏰ Set Reminder
+    - 📚 Library Hub
+    - ⚙️ Settings & Themes
+    - 📌 Minimize to Tray
     """
     def __init__(
         self,
@@ -55,33 +55,33 @@ class BookMenuOverlay(ctk.CTkToplevel):
         self.attributes("-topmost", True)
         self.configure(fg_color=TRANSPARENT_BG)
         
-        # Transparent background so ONLY the logos are visible on screen
+        # Transparent background so ONLY the logos are visible
         try:
             self.wm_attributes("-transparentcolor", TRANSPARENT_BG)
         except Exception:
             pass
 
-        self.logo_size = 54
-        self.spacing = 8
+        self.logo_size = 38
+        self.spacing = 6
         self.num_logos = 5
 
-        # Calculate dock dimensions (Horizontal dock of logos)
-        dock_w = self.num_logos * (self.logo_size + self.spacing) + 20
-        dock_h = self.logo_size + 38  # Extra height for smooth hover tooltip
+        # Compact dock dimensions
+        dock_w = self.num_logos * (self.logo_size + self.spacing) + 14
+        dock_h = self.logo_size + 24
 
         screen_w = self.winfo_screenwidth()
         screen_h = self.winfo_screenheight()
 
-        # Place dock adjacent to the floating book
+        # Place compact dock adjacent to the book
         if anchor_x + current_size + dock_w < screen_w:
-            pos_x = anchor_x + current_size + 10
+            pos_x = anchor_x + current_size + 6
         elif anchor_x - dock_w > 0:
-            pos_x = anchor_x - dock_w - 10
+            pos_x = anchor_x - dock_w - 6
         else:
-            pos_x = max(10, min(screen_w - dock_w - 10, anchor_x - (dock_w - current_size) // 2))
+            pos_x = max(6, min(screen_w - dock_w - 6, anchor_x - (dock_w - current_size) // 2))
 
         pos_y = anchor_y + (current_size - dock_h) // 2
-        pos_y = max(10, min(screen_h - dock_h - 10, pos_y))
+        pos_y = max(6, min(screen_h - dock_h - 6, pos_y))
 
         self.geometry(f"{dock_w}x{dock_h}+{pos_x}+{pos_y}")
 
@@ -95,31 +95,30 @@ class BookMenuOverlay(ctk.CTkToplevel):
         self.after(100, self.focus_force)
 
     def _build_ui(self):
-        # Transparent container frame
         self.container = ctk.CTkFrame(self, fg_color=TRANSPARENT_BG)
         self.container.pack(fill="both", expand=True)
 
         # Logos Row
         logos_row = ctk.CTkFrame(self.container, fg_color=TRANSPARENT_BG)
-        logos_row.pack(anchor="center", pady=(4, 0))
+        logos_row.pack(anchor="center", pady=(2, 0))
 
-        # Tooltip Label that updates smoothly on hover
+        # Compact Tooltip Indicator
         self.tooltip_lbl = ctk.CTkLabel(
             self.container,
             text="",
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
             text_color=self.theme["book_accent"],
             fg_color=TRANSPARENT_BG,
-            height=20
+            height=16
         )
-        self.tooltip_lbl.pack(anchor="center", pady=(2, 0))
+        self.tooltip_lbl.pack(anchor="center", pady=(1, 0))
 
-        # Option Logos Definition
+        # All 5 Options
         options = [
-            ("Take Quick Note", generate_note_logo, self._act_note),
+            ("Take Note", generate_note_logo, self._act_note),
             ("Set Reminder", generate_reminder_logo, self._act_reminder),
-            ("Library Archives", generate_library_logo, self._act_dashboard),
-            ("Settings & Themes", generate_settings_logo, self._act_settings),
+            ("Library Hub", generate_library_logo, self._act_dashboard),
+            ("Settings & Theme", generate_settings_logo, self._act_settings),
             ("Minimize to Tray", generate_tray_logo, self._act_hide),
         ]
 

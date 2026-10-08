@@ -1,19 +1,90 @@
 """
-Planner & Reminder Creator Window with 1-Click Presets and Custom Time Picker.
+Typable Date & Time Reminder Creator Window.
 """
 
 from datetime import datetime, timedelta
+import re
 import customtkinter as ctk
 from PIL import ImageTk
 from typing import Callable, Optional
 from src.database import Database
 from src.theme import THEMES, DEFAULT_THEME
-from src.book_graphics import generate_book_image
+from src.book_graphics import generate_reminder_logo
+
+
+def parse_smart_datetime(date_str: str, time_str: str) -> datetime:
+    """
+    Robust smart parser for typed date & time inputs.
+    Supports formats like:
+    - Dates: 2026-10-08, 08-10-2026, 08/10/2026, 10/8/2026, today, tomorrow
+    - Times: 6:30 PM, 06:30pm, 18:30, 6:30, 9 AM, 14:00
+    """
+    now = datetime.now()
+    d_clean = date_str.strip().lower()
+    t_clean = time_str.strip()
+
+    # 1. Parse Date
+    target_date = now.date()
+    if d_clean == "tomorrow":
+        target_date = (now + timedelta(days=1)).date()
+    elif d_clean in ("today", ""):
+        target_date = now.date()
+    else:
+        # Try matching YYYY-MM-DD, DD-MM-YYYY, YYYY/MM/DD, DD/MM/YYYY
+        matched_date = False
+        date_patterns = [
+            "%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%Y",
+            "%m/%d/%Y", "%m-%d-%Y", "%Y.%m.%d", "%d.%m.%Y"
+        ]
+        for fmt in date_patterns:
+            try:
+                target_date = datetime.strptime(d_clean, fmt).date()
+                matched_date = True
+                break
+            except ValueError:
+                pass
+        
+        if not matched_date:
+            target_date = now.date()
+
+    # 2. Parse Time
+    hour = now.hour
+    minute = (now.minute + 10) % 60
+    
+    t_clean = t_clean.upper().replace(" ", "")
+    
+    # Check 12-hour format with AM/PM (e.g. 6:30PM, 06:30AM, 9PM)
+    match_12 = re.match(r"^(\d{1,2})(?::(\d{1,2}))?(AM|PM)$", t_clean)
+    if match_12:
+        h = int(match_12.group(1))
+        m = int(match_12.group(2) or 0)
+        ampm = match_12.group(3)
+        if ampm == "PM" and h < 12:
+            h += 12
+        elif ampm == "AM" and h == 12:
+            h = 0
+        hour, minute = h, m
+    else:
+        # Check 24-hour or plain format (e.g. 18:30, 6:30, 1830)
+        match_24 = re.match(r"^(\d{1,2}):(\d{1,2})$", t_clean)
+        if match_24:
+            hour = int(match_24.group(1))
+            minute = int(match_24.group(2))
+        else:
+            # Fallback to current time + 10 min
+            future = now + timedelta(minutes=10)
+            hour = future.hour
+            minute = future.minute
+
+    hour = max(0, min(23, hour))
+    minute = max(0, min(59, minute))
+
+    return datetime(target_date.year, target_date.month, target_date.day, hour, minute, 0)
 
 
 class ReminderWindow(ctk.CTkToplevel):
     """
-    Planner-styled Reminder Creation Dialog.
+    Compact Reminder Creator with DIRECTLY TYPABLE Date & Time inputs.
     """
     def __init__(
         self,
@@ -28,17 +99,18 @@ class ReminderWindow(ctk.CTkToplevel):
         self.theme_name = theme_name
         self.theme = THEMES.get(theme_name, THEMES[DEFAULT_THEME])
 
-        self.title("⏰ Set Planner Reminder")
-        self.geometry("520x640")
+        self.title("⏰ Set Reminder")
+        self.geometry("380x320")
         self.attributes("-topmost", True)
+        self.resizable(False, False)
         self.configure(fg_color=self.theme["bg_primary"])
 
         # Center window
         screen_w = self.winfo_screenwidth()
         screen_h = self.winfo_screenheight()
-        x = (screen_w - 520) // 2
-        y = (screen_h - 640) // 2
-        self.geometry(f"520x640+{x}+{y}")
+        x = (screen_w - 380) // 2
+        y = (screen_h - 320) // 2
+        self.geometry(f"380x320+{x}+{y}")
 
         self._build_ui()
 
@@ -46,214 +118,180 @@ class ReminderWindow(ctk.CTkToplevel):
         card = ctk.CTkFrame(
             self,
             fg_color=self.theme["bg_secondary"],
-            corner_radius=16,
+            corner_radius=12,
             border_width=2,
             border_color=self.theme["book_accent"]
         )
-        card.pack(fill="both", expand=True, padx=14, pady=14)
+        card.pack(fill="both", expand=True, padx=6, pady=6)
 
         # 1. Header
         header = ctk.CTkFrame(card, fg_color="transparent")
-        header.pack(fill="x", padx=16, pady=(12, 8))
+        header.pack(fill="x", padx=10, pady=(6, 4))
 
-        book_pil = generate_book_image(size=36, theme_name=self.theme_name, is_hovered=True)
-        self.book_img = ImageTk.PhotoImage(book_pil)
-        icon_lbl = ctk.CTkLabel(header, image=self.book_img, text="")
-        icon_lbl.pack(side="left", padx=(0, 8))
+        logo_pil = generate_reminder_logo(size=22, theme_name=self.theme_name, is_hovered=True)
+        self.logo_img = ImageTk.PhotoImage(logo_pil)
+        icon_lbl = ctk.CTkLabel(header, image=self.logo_img, text="")
+        icon_lbl.pack(side="left", padx=(0, 6))
 
         title_lbl = ctk.CTkLabel(
             header,
-            text="PLANNER ALARM / REMINDER",
-            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            text="SET REMINDER (TYPE DATE & TIME)",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             text_color=self.theme["book_accent"]
         )
         title_lbl.pack(side="left")
 
-        # 2. Reminder Title
-        lbl_title = ctk.CTkLabel(
-            card,
-            text="Reminder Subject / Task:",
-            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
-            text_color=self.theme["text_secondary"]
+        close_btn = ctk.CTkButton(
+            header,
+            text="✕",
+            width=20,
+            height=20,
+            fg_color="transparent",
+            hover_color=self.theme["danger"],
+            text_color=self.theme["text_secondary"],
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=self.destroy
         )
-        lbl_title.pack(anchor="w", padx=16, pady=(6, 2))
+        close_btn.pack(side="right")
 
+        # 2. Reminder Task Subject
         self.title_entry = ctk.CTkEntry(
             card,
-            placeholder_text="e.g. Team Meeting, Drink Water, Take Break...",
-            font=ctk.CTkFont(family="Segoe UI", size=13),
+            placeholder_text="Enter task (e.g. Meeting, Call, Drink Water)...",
+            font=ctk.CTkFont(family="Segoe UI", size=12),
             fg_color=self.theme["bg_primary"],
             border_color=self.theme["bg_card"],
-            height=36,
-            corner_radius=8
+            height=32,
+            corner_radius=6
         )
-        self.title_entry.pack(fill="x", padx=16, pady=(0, 10))
+        self.title_entry.pack(fill="x", padx=10, pady=(2, 6))
+        self.title_entry.focus_set()
 
-        # 3. Quick Presets Section
-        preset_lbl = ctk.CTkLabel(
-            card,
-            text="⚡ 1-Click Quick Presets:",
-            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
-            text_color=self.theme["book_accent"]
-        )
-        preset_lbl.pack(anchor="w", padx=16, pady=(2, 4))
-
-        preset_grid = ctk.CTkFrame(card, fg_color="transparent")
-        preset_grid.pack(fill="x", padx=16, pady=(0, 12))
+        # 3. Quick 1-Click Presets (Updates typed fields automatically)
+        preset_frame = ctk.CTkFrame(card, fg_color="transparent")
+        preset_frame.pack(fill="x", padx=10, pady=(0, 6))
 
         presets = [
-            ("⏱️ In 5 Min", 5),
-            ("⏱️ In 15 Min", 15),
-            ("⏱️ In 30 Min", 30),
-            ("⏰ In 1 Hour", 60),
-            ("🌙 Tonight 8 PM", "tonight_8pm"),
-            ("🌅 Tomorrow 9 AM", "tomorrow_9am")
+            ("+5m", 5),
+            ("+15m", 15),
+            ("+30m", 30),
+            ("+1h", 60),
+            ("Tomorrow 9am", "tomorrow_9am")
         ]
 
-        for i, (label, val) in enumerate(presets):
-            row = i // 3
-            col = i % 3
+        for label, val in presets:
             btn = ctk.CTkButton(
-                preset_grid,
+                preset_frame,
                 text=label,
-                font=ctk.CTkFont(size=11),
+                font=ctk.CTkFont(size=10),
+                height=22,
                 fg_color=self.theme["bg_card"],
                 hover_color=self.theme["book_cover"],
-                height=30,
-                corner_radius=8,
+                corner_radius=6,
                 command=lambda v=val: self._apply_preset(v)
             )
-            btn.grid(row=row, column=col, padx=3, pady=3, sticky="ew")
-            preset_grid.columnconfigure(col, weight=1)
+            btn.pack(side="left", padx=1, expand=True, fill="x")
 
-        # 4. Custom Date & Time Picker Frame
-        picker_box = ctk.CTkFrame(
+        # 4. TYPABLE Date & Time Entry Section
+        inputs_box = ctk.CTkFrame(
             card,
             fg_color=self.theme["bg_primary"],
-            corner_radius=10,
+            corner_radius=8,
             border_width=1,
             border_color=self.theme["bg_card"]
         )
-        picker_box.pack(fill="x", padx=16, pady=(0, 10))
-
-        picker_title = ctk.CTkLabel(
-            picker_box,
-            text="📅 Exact Date & Time Schedule:",
-            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
-            text_color=self.theme["text_primary"]
-        )
-        picker_title.pack(anchor="w", padx=12, pady=(8, 6))
-
-        # Date Row
-        date_row = ctk.CTkFrame(picker_box, fg_color="transparent")
-        date_row.pack(fill="x", padx=12, pady=(0, 6))
+        inputs_box.pack(fill="x", padx=10, pady=(0, 6))
 
         now = datetime.now()
-        
-        ctk.CTkLabel(date_row, text="Date:", font=ctk.CTkFont(size=11), width=45).pack(side="left")
-        
-        # Year, Month, Day Option Menus
-        years = [str(now.year + i) for i in range(3)]
-        self.year_menu = ctk.CTkOptionMenu(date_row, values=years, width=80, height=28, fg_color=self.theme["bg_card"])
-        self.year_menu.set(str(now.year))
-        self.year_menu.pack(side="left", padx=2)
+        default_date = now.strftime("%Y-%m-%d")
+        default_time = (now + timedelta(minutes=15)).strftime("%I:%M %p")
 
-        months = [f"{m:02d}" for m in range(1, 13)]
-        self.month_menu = ctk.CTkOptionMenu(date_row, values=months, width=70, height=28, fg_color=self.theme["bg_card"])
-        self.month_menu.set(f"{now.month:02d}")
-        self.month_menu.pack(side="left", padx=2)
+        # Date Row (Typable)
+        d_row = ctk.CTkFrame(inputs_box, fg_color="transparent")
+        d_row.pack(fill="x", padx=8, pady=(6, 3))
 
-        days = [f"{d:02d}" for d in range(1, 32)]
-        self.day_menu = ctk.CTkOptionMenu(date_row, values=days, width=70, height=28, fg_color=self.theme["bg_card"])
-        self.day_menu.set(f"{now.day:02d}")
-        self.day_menu.pack(side="left", padx=2)
+        ctk.CTkLabel(
+            d_row,
+            text="📅 Type Date:",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color=self.theme["book_accent"],
+            width=85,
+            anchor="w"
+        ).pack(side="left")
 
-        # Time Row
-        time_row = ctk.CTkFrame(picker_box, fg_color="transparent")
-        time_row.pack(fill="x", padx=12, pady=(0, 8))
-
-        ctk.CTkLabel(time_row, text="Time:", font=ctk.CTkFont(size=11), width=45).pack(side="left")
-
-        hours = [f"{h:02d}" for h in range(1, 13)]
-        self.hour_menu = ctk.CTkOptionMenu(time_row, values=hours, width=70, height=28, fg_color=self.theme["bg_card"])
-        curr_12hr = now.hour % 12 or 12
-        self.hour_menu.set(f"{curr_12hr:02d}")
-        self.hour_menu.pack(side="left", padx=2)
-
-        minutes = [f"{m:02d}" for m in range(0, 60, 5)]
-        self.minute_menu = ctk.CTkOptionMenu(time_row, values=minutes, width=70, height=28, fg_color=self.theme["bg_card"])
-        # Round up to next 5 minutes
-        next_min = ((now.minute // 5) + 1) * 5
-        if next_min >= 60:
-            next_min = 0
-        self.minute_menu.set(f"{next_min:02d}")
-        self.minute_menu.pack(side="left", padx=2)
-
-        self.ampm_menu = ctk.CTkOptionMenu(time_row, values=["AM", "PM"], width=70, height=28, fg_color=self.theme["bg_card"])
-        self.ampm_menu.set("PM" if now.hour >= 12 else "AM")
-        self.ampm_menu.pack(side="left", padx=2)
-
-        # Repeat Row
-        repeat_row = ctk.CTkFrame(picker_box, fg_color="transparent")
-        repeat_row.pack(fill="x", padx=12, pady=(0, 8))
-
-        ctk.CTkLabel(repeat_row, text="Repeat:", font=ctk.CTkFont(size=11), width=50).pack(side="left")
-        self.repeat_menu = ctk.CTkOptionMenu(
-            repeat_row,
-            values=["Once (No Repeat)", "Daily", "Weekly"],
-            width=160,
+        self.date_entry = ctk.CTkEntry(
+            d_row,
+            font=ctk.CTkFont(family="Segoe UI", size=12),
             height=28,
+            fg_color=self.theme["bg_secondary"],
+            border_color=self.theme["bg_card"]
+        )
+        self.date_entry.insert(0, default_date)
+        self.date_entry.pack(side="left", fill="x", expand=True, padx=(4, 0))
+
+        # Time Row (Typable)
+        t_row = ctk.CTkFrame(inputs_box, fg_color="transparent")
+        t_row.pack(fill="x", padx=8, pady=(3, 6))
+
+        ctk.CTkLabel(
+            t_row,
+            text="⏰ Type Time:",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color=self.theme["book_accent"],
+            width=85,
+            anchor="w"
+        ).pack(side="left")
+
+        self.time_entry = ctk.CTkEntry(
+            t_row,
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            height=28,
+            fg_color=self.theme["bg_secondary"],
+            border_color=self.theme["bg_card"]
+        )
+        self.time_entry.insert(0, default_time)
+        self.time_entry.pack(side="left", fill="x", expand=True, padx=(4, 0))
+
+        # 5. Repeat & Enter Shortcut row
+        rep_row = ctk.CTkFrame(card, fg_color="transparent")
+        rep_row.pack(fill="x", padx=10, pady=(0, 6))
+
+        ctk.CTkLabel(rep_row, text="Repeat:", font=ctk.CTkFont(size=10), width=45).pack(side="left")
+        self.repeat_menu = ctk.CTkOptionMenu(
+            rep_row,
+            values=["Once", "Daily", "Weekly"],
+            width=110,
+            height=24,
+            font=ctk.CTkFont(size=10),
             fg_color=self.theme["bg_card"]
         )
-        self.repeat_menu.set("Once (No Repeat)")
-        self.repeat_menu.pack(side="left", padx=2)
+        self.repeat_menu.set("Once")
+        self.repeat_menu.pack(side="left")
 
-        # 5. Additional Description
-        lbl_desc = ctk.CTkLabel(
-            card,
-            text="Optional Notes / Details:",
-            font=ctk.CTkFont(family="Segoe UI", size=12),
+        hint_lbl = ctk.CTkLabel(
+            rep_row,
+            text="Press Enter to save",
+            font=ctk.CTkFont(size=9),
             text_color=self.theme["text_secondary"]
         )
-        lbl_desc.pack(anchor="w", padx=16, pady=(4, 2))
+        hint_lbl.pack(side="right")
 
-        self.desc_entry = ctk.CTkTextbox(
-            card,
-            height=60,
-            fg_color=self.theme["bg_primary"],
-            border_color=self.theme["bg_card"],
-            border_width=1,
-            corner_radius=8,
-            font=ctk.CTkFont(size=12)
-        )
-        self.desc_entry.pack(fill="x", padx=16, pady=(0, 12))
-
-        # 6. Bottom Action Button
-        btn_bar = ctk.CTkFrame(card, fg_color="transparent")
-        btn_bar.pack(fill="x", padx=16, pady=(0, 10))
-
-        cancel_btn = ctk.CTkButton(
-            btn_bar,
-            text="Cancel",
-            width=80,
-            height=34,
-            fg_color=self.theme["bg_card"],
-            hover_color=self.theme["bg_primary"],
-            font=ctk.CTkFont(size=12),
-            command=self.destroy
-        )
-        cancel_btn.pack(side="left")
-
+        # 6. Bottom Save Button
         save_btn = ctk.CTkButton(
-            btn_bar,
+            card,
             text="🔔 Set Reminder",
-            height=34,
+            height=30,
+            font=ctk.CTkFont(size=11, weight="bold"),
             fg_color=self.theme["book_cover"],
             hover_color=self.theme["book_spine"],
-            font=ctk.CTkFont(size=12, weight="bold"),
+            corner_radius=6,
             command=self._save_reminder
         )
-        save_btn.pack(side="right", expand=True, fill="x", padx=(10, 0))
+        save_btn.pack(fill="x", padx=10, pady=(0, 6))
+
+        # Enter key triggers save
+        for entry in (self.title_entry, self.date_entry, self.time_entry):
+            entry.bind("<Return>", lambda e: self._save_reminder())
 
     def _apply_preset(self, val):
         now = datetime.now()
@@ -261,60 +299,33 @@ class ReminderWindow(ctk.CTkToplevel):
 
         if isinstance(val, int):
             target_time = now + timedelta(minutes=val)
-        elif val == "tonight_8pm":
-            target_time = now.replace(hour=20, minute=0, second=0, microsecond=0)
-            if target_time <= now:
-                target_time += timedelta(days=1)
         elif val == "tomorrow_9am":
             target_time = (now + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
 
-        # Update Pickers
-        self.year_menu.set(str(target_time.year))
-        self.month_menu.set(f"{target_time.month:02d}")
-        self.day_menu.set(f"{target_time.day:02d}")
+        # Update typed fields
+        self.date_entry.delete(0, "end")
+        self.date_entry.insert(0, target_time.strftime("%Y-%m-%d"))
 
-        hr12 = target_time.hour % 12 or 12
-        self.hour_menu.set(f"{hr12:02d}")
-        self.minute_menu.set(f"{target_time.minute:02d}")
-        self.ampm_menu.set("PM" if target_time.hour >= 12 else "AM")
+        self.time_entry.delete(0, "end")
+        self.time_entry.insert(0, target_time.strftime("%I:%M %p"))
 
     def _save_reminder(self):
         title = self.title_entry.get().strip() or "Reminder"
-        description = self.desc_entry.get("1.0", "end-1c").strip()
+        date_str = self.date_entry.get().strip()
+        time_str = self.time_entry.get().strip()
 
-        # Build target datetime string
-        try:
-            year = int(self.year_menu.get())
-            month = int(self.month_menu.get())
-            day = int(self.day_menu.get())
-
-            hr = int(self.hour_menu.get())
-            if self.ampm_menu.get() == "PM" and hr < 12:
-                hr += 12
-            elif self.ampm_menu.get() == "AM" and hr == 12:
-                hr = 0
-                
-            minute = int(self.minute_menu.get())
-            target_dt = datetime(year, month, day, hr, minute, 0)
-        except Exception:
-            target_dt = datetime.now() + timedelta(minutes=10)
+        target_dt = parse_smart_datetime(date_str, time_str)
 
         repeat_raw = self.repeat_menu.get()
-        repeat_map = {
-            "Once (No Repeat)": "none",
-            "Daily": "daily",
-            "Weekly": "weekly"
-        }
+        repeat_map = {"Once": "none", "Daily": "daily", "Weekly": "weekly"}
         repeat = repeat_map.get(repeat_raw, "none")
 
         self.db.add_reminder(
             title=title,
             remind_time=target_dt.strftime("%Y-%m-%d %H:%M:%S"),
-            description=description,
             repeat_interval=repeat
         )
 
         if self.on_saved:
             self.on_saved()
         self.destroy()
-

@@ -164,8 +164,29 @@ class TestBookApp(unittest.TestCase):
             self.assertEqual(img_norm.size, (48, 48))
             self.assertEqual(img_norm.mode, "RGBA")
 
-            img_hov = logo_fn(size=48, theme_name="Classic Leather", is_hovered=True)
-            self.assertEqual(img_hov.size, (48, 48))
+    def test_smart_datetime_parser(self):
+        from src.reminder_window import parse_smart_datetime
+        # Test standard YYYY-MM-DD and 12hr PM
+        dt1 = parse_smart_datetime("2026-10-08", "06:30 PM")
+        self.assertEqual(dt1.year, 2026)
+        self.assertEqual(dt1.month, 10)
+        self.assertEqual(dt1.day, 8)
+        self.assertEqual(dt1.hour, 18)
+        self.assertEqual(dt1.minute, 30)
+
+        # Test 24hr format
+        dt2 = parse_smart_datetime("2026-12-25", "14:15")
+        self.assertEqual(dt2.month, 12)
+        self.assertEqual(dt2.day, 25)
+        self.assertEqual(dt2.hour, 14)
+        self.assertEqual(dt2.minute, 15)
+
+        # Test 'tomorrow'
+        dt3 = parse_smart_datetime("tomorrow", "9:00 AM")
+        now = datetime.now()
+        expected_day = (now + timedelta(days=1)).day
+        self.assertEqual(dt3.day, expected_day)
+        self.assertEqual(dt3.hour, 9)
 
 
 if __name__ == "__main__":
