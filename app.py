@@ -139,10 +139,15 @@ class BookApp:
                 master=self.root,
                 db=self.db,
                 on_theme_changed=self._on_theme_changed,
+                on_change_size=self._on_widget_size_changed,
                 theme_name=self.theme_name
             )
             if initial_tab == "settings":
                 self.dashboard_win._show_settings_tab()
+
+    def _on_widget_size_changed(self, new_size: int):
+        if self.widget and self.widget.winfo_exists():
+            self.widget.set_icon_size(new_size)
 
     def _on_theme_changed(self, new_theme: str):
         self.theme_name = new_theme

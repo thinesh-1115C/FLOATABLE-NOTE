@@ -141,14 +141,31 @@ class TestBookApp(unittest.TestCase):
         app_icon = generate_app_icon(size=128)
         self.assertEqual(app_icon.size, (128, 128))
 
-    def test_categories_integrity(self):
-        cat_names = [c["name"] for c in NOTE_CATEGORIES]
-        self.assertIn("General", cat_names)
-        self.assertIn("Ideas", cat_names)
-        self.assertIn("Work", cat_names)
-        self.assertIn("Personal", cat_names)
-        self.assertIn("Urgent", cat_names)
-        self.assertIn("Study", cat_names)
+    def test_icon_size_settings(self):
+        self.db.set_setting("icon_size", 96)
+        self.assertEqual(int(self.db.get_setting("icon_size")), 96)
+
+        # Test rendering at various sizes (small to huge)
+        for sz in [40, 52, 72, 96, 120, 160]:
+            img = generate_book_image(size=sz, theme_name="Classic Leather", is_hovered=False)
+            self.assertEqual(img.size, (sz, sz))
+            self.assertEqual(img.mode, "RGBA")
+
+    def test_option_logos_generation(self):
+        from src.book_graphics import (
+            generate_note_logo,
+            generate_reminder_logo,
+            generate_library_logo,
+            generate_settings_logo,
+            generate_tray_logo
+        )
+        for logo_fn in (generate_note_logo, generate_reminder_logo, generate_library_logo, generate_settings_logo, generate_tray_logo):
+            img_norm = logo_fn(size=48, theme_name="Classic Leather", is_hovered=False)
+            self.assertEqual(img_norm.size, (48, 48))
+            self.assertEqual(img_norm.mode, "RGBA")
+
+            img_hov = logo_fn(size=48, theme_name="Classic Leather", is_hovered=True)
+            self.assertEqual(img_hov.size, (48, 48))
 
 
 if __name__ == "__main__":

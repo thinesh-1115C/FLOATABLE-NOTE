@@ -22,11 +22,13 @@ class DashboardWindow(ctk.CTkToplevel):
         master,
         db: Database,
         on_theme_changed: Optional[Callable] = None,
+        on_change_size: Optional[Callable] = None,
         theme_name: str = DEFAULT_THEME
     ):
         super().__init__(master)
         self.db = db
         self.on_theme_changed = on_theme_changed
+        self.on_change_size = on_change_size
         self.theme_name = self.db.get_setting("theme", theme_name)
         self.theme = THEMES.get(self.theme_name, THEMES[DEFAULT_THEME])
 
@@ -536,7 +538,7 @@ class DashboardWindow(ctk.CTkToplevel):
         theme_menu = ctk.CTkOptionMenu(
             box,
             values=list(THEMES.keys()),
-            width=260,
+            width=280,
             height=34,
             fg_color=self.theme["bg_card"],
             command=self._change_theme
@@ -544,30 +546,67 @@ class DashboardWindow(ctk.CTkToplevel):
         theme_menu.set(self.theme_name)
         theme_menu.pack(anchor="w", pady=(0, 16))
 
-        # 2. Floating Book Transparency / Opacity Slider
-        curr_op = float(self.db.get_setting("opacity", 0.95))
-        ctk.CTkLabel(
+        # 2. Book Widget Size Slider
+        curr_size = int(self.db.get_setting("icon_size", 72))
+        self.size_lbl = ctk.CTkLabel(
             box,
-            text=f"✨ Floating Widget Opacity: ({int(curr_op * 100)}%)",
+            text=f"📐 Floating Book Size: {curr_size}px",
             font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
             text_color=self.theme["book_accent"]
-        ).pack(anchor="w", pady=(0, 6))
+        )
+        self.size_lbl.pack(anchor="w", pady=(0, 6))
+
+        size_slider = ctk.CTkSlider(
+            box,
+            from_=40,
+            to=140,
+            number_of_steps=20,
+            width=280,
+            command=self._change_size
+        )
+        size_slider.set(curr_size)
+        size_slider.pack(anchor="w", pady=(0, 6))
+
+        # Quick size presets row
+        preset_row = ctk.CTkFrame(box, fg_color="transparent")
+        preset_row.pack(anchor="w", pady=(0, 16))
+
+        for lbl, sz in [("Tiny (48px)", 48), ("Small (64px)", 64), ("Medium (80px)", 80), ("Large (100px)", 100), ("Huge (128px)", 128)]:
+            ctk.CTkButton(
+                preset_row,
+                text=lbl,
+                font=ctk.CTkFont(size=10),
+                height=24,
+                fg_color=self.theme["bg_card"],
+                hover_color=self.theme["book_cover"],
+                command=lambda s=sz, sl=size_slider: (sl.set(s), self._change_size(s))
+            ).pack(side="left", padx=2)
+
+        # 3. Floating Book Transparency / Opacity Slider
+        curr_op = float(self.db.get_setting("opacity", 0.95))
+        self.op_lbl = ctk.CTkLabel(
+            box,
+            text=f"✨ Floating Widget Opacity: {int(curr_op * 100)}%",
+            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+            text_color=self.theme["book_accent"]
+        )
+        self.op_lbl.pack(anchor="w", pady=(0, 6))
 
         op_slider = ctk.CTkSlider(
             box,
             from_=0.4,
             to=1.0,
             number_of_steps=12,
-            width=260,
+            width=280,
             command=self._change_opacity
         )
         op_slider.set(curr_op)
         op_slider.pack(anchor="w", pady=(0, 16))
 
-        # 3. Reset Widget Position
+        # 4. Reset Widget Position
         ctk.CTkLabel(
             box,
-            text="📍 Floating Book Screen Position:",
+            text="📍 Floating Book Position:",
             font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
             text_color=self.theme["book_accent"]
         ).pack(anchor="w", pady=(0, 6))
@@ -575,13 +614,20 @@ class DashboardWindow(ctk.CTkToplevel):
         reset_pos_btn = ctk.CTkButton(
             box,
             text="Reset Book to Top-Right Corner",
-            width=240,
+            width=280,
             height=32,
             fg_color=self.theme["bg_card"],
             hover_color=self.theme["book_cover"],
             command=self._reset_position
         )
         reset_pos_btn.pack(anchor="w", pady=(0, 16))
+
+    def _change_size(self, val: float):
+        sz = int(val)
+        self.size_lbl.configure(text=f"📐 Floating Book Size: {sz}px")
+        self.db.set_setting("icon_size", sz)
+        if self.on_change_size:
+            self.on_change_size(sz)
 
     def _change_theme(self, new_theme: str):
         self.theme_name = new_theme
@@ -592,6 +638,7 @@ class DashboardWindow(ctk.CTkToplevel):
         self.destroy()
 
     def _change_opacity(self, val: float):
+        self.op_lbl.configure(text=f"✨ Floating Widget Opacity: {int(val * 100)}%")
         self.db.set_setting("opacity", round(val, 2))
         if self.master and hasattr(self.master, "attributes"):
             try:

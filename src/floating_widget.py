@@ -1,7 +1,8 @@
 """
-Draggable, Always-On-Top Floating Book Widget.
+Draggable, Resizable, Always-On-Top Floating Book Widget.
 """
 
+import time
 import customtkinter as ctk
 from PIL import ImageTk
 from typing import Callable, Optional
@@ -10,10 +11,15 @@ from src.theme import THEMES, DEFAULT_THEME, DEFAULT_OPACITY, DEFAULT_ICON_SIZE
 from src.book_graphics import generate_book_image
 from src.menu_overlay import BookMenuOverlay
 
+MIN_ICON_SIZE = 40
+MAX_ICON_SIZE = 160
+
 
 class FloatingBookWidget(ctk.CTkToplevel):
     """
     A stylish floating Book widget that stays pinned above all other windows on Windows desktop.
+    Supports buttery-smooth dragging anywhere across the screen without accidental menu popups
+    and dynamic on-the-fly resizing (mouse wheel or slider).
     """
     def __init__(
         self,
@@ -42,14 +48,16 @@ class FloatingBookWidget(ctk.CTkToplevel):
         self.attributes("-alpha", float(self.db.get_setting("opacity", DEFAULT_OPACITY)))
         
         # Transparent background styling
-        # Note: on Windows, we use a dark background matching the theme or transparent key
         self.configure(fg_color=self.theme["bg_primary"])
         try:
             self.wm_attributes("-transparentcolor", self.theme["bg_primary"])
         except Exception:
             pass
 
-        self.widget_size = DEFAULT_ICON_SIZE + 16
+        # Load icon size from settings
+        self.icon_size = int(self.db.get_setting("icon_size", DEFAULT_ICON_SIZE))
+        self.icon_size = max(MIN_ICON_SIZE, min(MAX_ICON_SIZE, self.icon_size))
+        self.widget_size = self.icon_size + 16
         
         # Load saved position or default to top right
         screen_w = self.winfo_screenwidth()
@@ -59,15 +67,14 @@ class FloatingBookWidget(ctk.CTkToplevel):
         saved_x = int(self.db.get_setting("pos_x", default_x))
         saved_y = int(self.db.get_setting("pos_y", default_y))
         
-        # Clamp to screen bounds
-        saved_x = max(10, min(screen_w - self.widget_size - 10, saved_x))
-        saved_y = max(10, min(self.winfo_screenheight() - self.widget_size - 10, saved_y))
-        
         self.geometry(f"{self.widget_size}x{self.widget_size}+{saved_x}+{saved_y}")
 
-        # Drag state variables
-        self._drag_start_x = 0
-        self._drag_start_y = 0
+        # Drag tracking offsets and timestamp
+        self._offset_x = 0
+        self._offset_y = 0
+        self._press_screen_x = 0
+        self._press_screen_y = 0
+        self._press_time = 0.0
         self._drag_occurred = False
         self.is_hovered = False
 
@@ -76,14 +83,14 @@ class FloatingBookWidget(ctk.CTkToplevel):
         self._bind_events()
 
     def _load_icons(self):
-        # Generate normal and hover book states
+        # Generate normal and hover book states at current icon size
         self.normal_pil = generate_book_image(
-            size=DEFAULT_ICON_SIZE,
+            size=self.icon_size,
             theme_name=self.theme_name,
             is_hovered=False
         )
         self.hover_pil = generate_book_image(
-            size=DEFAULT_ICON_SIZE,
+            size=self.icon_size,
             theme_name=self.theme_name,
             is_hovered=True
         )
@@ -103,58 +110,134 @@ class FloatingBookWidget(ctk.CTkToplevel):
             self.container,
             image=self.normal_img,
             text="",
-            cursor="hand2"
+            cursor="fleur"  # Move cursor to clearly show it is movable across the screen
         )
         self.book_label.place(relx=0.5, rely=0.5, anchor="center")
 
     def _bind_events(self):
-        # Dragging & Clicking on book
-        for w in (self, self.container, self.book_label):
+        # Bind exclusively to the container and book label
+        widgets_to_bind = (self.container, self.book_label)
+        for w in widgets_to_bind:
+            # Mouse Left Press / Drag / Release
             w.bind("<ButtonPress-1>", self._on_press)
             w.bind("<B1-Motion>", self._on_drag)
             w.bind("<ButtonRelease-1>", self._on_release)
-            w.bind("<Button-3>", self._on_right_click)  # Right click context
+
+            # Middle Mouse Drag Support
+            w.bind("<ButtonPress-2>", self._on_press)
+            w.bind("<B2-Motion>", self._on_drag)
+            w.bind("<ButtonRelease-2>", self._on_release)
+            
+            # Mouse Right Click for quick menu
+            w.bind("<Button-3>", self._on_right_click)
+            
+            # Hover glow effects
             w.bind("<Enter>", self._on_mouse_enter)
             w.bind("<Leave>", self._on_mouse_leave)
+            
+            # Mouse Wheel to Dynamically Resize on the fly!
+            w.bind("<MouseWheel>", self._on_mouse_wheel)
+            w.bind("<Button-4>", lambda e: self.adjust_size(6))
+            w.bind("<Button-5>", lambda e: self.adjust_size(-6))
 
     def _on_mouse_enter(self, event):
         self.is_hovered = True
         self.book_label.configure(image=self.hover_img)
-        self.attributes("-alpha", 1.0)  # Full opacity on hover
+        self.attributes("-alpha", 1.0)
+        return "break"
 
     def _on_mouse_leave(self, event):
-        self.is_hovered = False
-        self.book_label.configure(image=self.normal_img)
-        self.attributes("-alpha", float(self.db.get_setting("opacity", DEFAULT_OPACITY)))
+        if not self._drag_occurred:
+            self.is_hovered = False
+            self.book_label.configure(image=self.normal_img)
+            self.attributes("-alpha", float(self.db.get_setting("opacity", DEFAULT_OPACITY)))
+        return "break"
 
     def _on_press(self, event):
-        self._drag_start_x = event.x_root
-        self._drag_start_y = event.y_root
+        """Records initial click position and absolute window offset for jitter-free dragging."""
+        self._offset_x = event.x_root - self.winfo_x()
+        self._offset_y = event.y_root - self.winfo_y()
+        self._press_screen_x = event.x_root
+        self._press_screen_y = event.y_root
+        self._press_time = time.time()
         self._drag_occurred = False
+        self.attributes("-alpha", 1.0)
+        return "break"
 
     def _on_drag(self, event):
-        dx = event.x_root - self._drag_start_x
-        dy = event.y_root - self._drag_start_y
+        """Calculates exact absolute position without Tkinter winfo jitter."""
+        dist = abs(event.x_root - self._press_screen_x) + abs(event.y_root - self._press_screen_y)
         
-        # If moved more than 4 pixels, consider it a drag
-        if abs(dx) > 4 or abs(dy) > 4:
+        # If user moved mouse more than 5 pixels, register as drag
+        if dist > 5:
             self._drag_occurred = True
-            
-        cur_x = self.winfo_x() + dx
-        cur_y = self.winfo_y() + dy
-        self.geometry(f"+{cur_x}+{cur_y}")
+
+        new_x = event.x_root - self._offset_x
+        new_y = event.y_root - self._offset_y
         
-        self._drag_start_x = event.x_root
-        self._drag_start_y = event.y_root
+        # Position window directly at mouse cursor
+        self.geometry(f"+{new_x}+{new_y}")
+        return "break"
 
     def _on_release(self, event):
-        if self._drag_occurred:
-            # Save new position to DB
+        dist = abs(event.x_root - self._press_screen_x) + abs(event.y_root - self._press_screen_y)
+        elapsed = time.time() - self._press_time
+        
+        # Determine if this was a drag gesture vs a stationary click
+        is_drag = self._drag_occurred or dist > 5 or elapsed > 0.35
+
+        if is_drag:
+            # User dragged and placed the logo: Save coordinates and DO NOT open options menu!
             self.db.set_setting("pos_x", self.winfo_x())
             self.db.set_setting("pos_y", self.winfo_y())
         else:
-            # Click detected -> Open Book Menu Overlay
+            # Quick stationary click: Open options menu
             self._toggle_menu()
+
+        self._drag_occurred = False
+
+        if not self.is_hovered:
+            self.book_label.configure(image=self.normal_img)
+            self.attributes("-alpha", float(self.db.get_setting("opacity", DEFAULT_OPACITY)))
+
+        return "break"
+
+    def _on_mouse_wheel(self, event):
+        """Scroll wheel over the book dynamically adjusts its size in real-time."""
+        if event.delta > 0:
+            self.adjust_size(6)
+        elif event.delta < 0:
+            self.adjust_size(-6)
+        return "break"
+
+    def adjust_size(self, delta: int):
+        new_size = self.icon_size + delta
+        self.set_icon_size(new_size)
+
+    def set_icon_size(self, new_size: int):
+        """Resizes the book widget dynamically and updates screen geometry."""
+        new_size = max(MIN_ICON_SIZE, min(MAX_ICON_SIZE, int(new_size)))
+        if new_size == self.icon_size:
+            return
+
+        old_widget_size = self.widget_size
+        self.icon_size = new_size
+        self.widget_size = self.icon_size + 16
+
+        # Adjust position slightly so resizing expands from the center
+        cur_x = self.winfo_x() - (self.widget_size - old_widget_size) // 2
+        cur_y = self.winfo_y() - (self.widget_size - old_widget_size) // 2
+
+        # Re-render book images at new resolution
+        self._load_icons()
+        self.book_label.configure(image=self.hover_img if self.is_hovered else self.normal_img)
+
+        self.geometry(f"{self.widget_size}x{self.widget_size}+{cur_x}+{cur_y}")
+        
+        # Save new size and position
+        self.db.set_setting("icon_size", self.icon_size)
+        self.db.set_setting("pos_x", cur_x)
+        self.db.set_setting("pos_y", cur_y)
 
     def _toggle_menu(self):
         BookMenuOverlay(
@@ -166,12 +249,14 @@ class FloatingBookWidget(ctk.CTkToplevel):
             on_open_dashboard=self.on_open_dashboard,
             on_open_settings=self.on_open_settings,
             on_hide_widget=self.on_hide,
+            on_change_size=self.set_icon_size,
+            current_size=self.icon_size,
             theme_name=self.theme_name
         )
 
     def _on_right_click(self, event):
-        # Quick direct right-click menu
         self._toggle_menu()
+        return "break"
 
     def update_theme(self, theme_name: str):
         self.theme_name = theme_name
@@ -183,4 +268,3 @@ class FloatingBookWidget(ctk.CTkToplevel):
             pass
         self._load_icons()
         self.book_label.configure(image=self.normal_img)
-
